@@ -1,0 +1,12 @@
+public class Win32KeyEvent {
+    [DllImport("user32.dll")]
+    extern static void keybd_event(
+        byte bVk,
+        byte bScan,
+        int dwFlags,
+        int dwExtraInfo
+    );
+    public static void SendKey(byte key, int flag) {
+        keybd_event(key, 0, flag, 0);
+    }
+}
