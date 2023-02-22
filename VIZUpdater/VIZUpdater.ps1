@@ -528,9 +528,9 @@ Function Invoke-ZGameVizUpdater {
                 [ThreadJob.ThreadJob]$FocusJob = Start-ThreadJob -ScriptBlock $AsyncFocus -Name 'Focus'
                 [System.String]$Text = [Microsoft.VisualBasic.Interaction]::InputBox('Enter new Spotify auth token', 'Spotify API token soon expired', 'Enter token...')
                 Remove-Job -Id $FocusJob.Id -Force
-                Remove-Variable -Name $FocusJob
+                Remove-Variable -Name FocusJob
                 If ($Text -Match 'BQ[a-zA-Z0-9_\-]{174}') {$Valid = $True}
-                Else {[System.Void]([Microsoft.VisualBasic.Interaction]::MsgBox('The token is invalid. Try again.', 16, 'Invalid API token'))}
+                Else {[System.Void][Microsoft.VisualBasic.Interaction]::MsgBox('The token is invalid. Try again.', 16, 'Invalid API token')}
             }
             Write-Output $Text
         } # ScriptBlock for asynchronous authentication job
