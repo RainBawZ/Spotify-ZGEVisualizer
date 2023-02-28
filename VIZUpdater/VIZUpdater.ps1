@@ -279,23 +279,28 @@ Function New-PlaybackObject {
 Function Write-PinnedHeader {
     [CmdletBinding()]
     Param (
-        [Parameter(Mandatory = $True)]
-        [System.Version]$Version,
-        [Parameter(Mandatory = $True)]
-        [System.IntPtr]$ZGEWindowHandle,
-        [Parameter(Mandatory = $True)]
-        [System.Int32]$RequestInterval,
-        [Parameter(Mandatory = $True)]
-        [System.Double]$TokenAge,
-        [Parameter(Mandatory = $True)]
-        [System.Double]$TokenExpires
+        [Parameter(Mandatory)][System.Version]$Version,
+        [Parameter(Mandatory)][System.IntPtr]$ZGEWindowHandle,
+        [Parameter(Mandatory)][System.Int32]$RequestInterval,
+        [Parameter(Mandatory)][System.Double]$TokenAge,
+        [Parameter(Mandatory)][System.Double]$TokenExpires,
+        [Parameter(Mandatory)][System.Int32]$TimeSinceRequest
     )
-    [System.TimeSpan]$Runtime = New-TimeSpan -Start $GLOBAL:StartupTime -End (Get-Date)
+    [System.TimeSpan]$Runtime               = New-TimeSpan -Start $GLOBAL:StartupTime -End (Get-Date)
+    [System.String]$VibeString              = ''
     [System.Collections.Hashtable]$VibeTime = @{
         Hours   = [System.String][System.Math]::Floor($Runtime.TotalHours)
         Minutes = [System.String]$Runtime.Minutes
     }
-    [System.String]$VibeString = ''
+    [System.Int32]$CurrentY                 = $Host.UI.RawUI.CursorPosition.Y
+    [System.Int32]$AgeMins                  = $TokenAge / 60
+    [System.Int32]$ExpireMins               = $TokenExpires / 6000
+    [System.ConsoleColor]$TokenColor        = Switch ($AgeMins) {
+        {$_ -ge ($ExpireMins * 100)} {[System.ConsoleColor]::Red; Break}        # >100% elapsed (expired)
+        {$_ -ge ($Expiremins * 90)}  {[System.ConsoleColor]::DarkYellow; Break} # >90% elapsed
+        {$_ -ge ($ExpireMins * 75)}  {[System.ConsoleColor]::Yellow; Break}     # >75% elapsed
+        Default                      {[System.ConsoleColor]::DarkCyan; Break}   # Normal
+    }
     If ($VibeTime.Hours -gt 0) {
         $VibeString = "for $($VibeTime.Hours) hour"
         If ($VibeTime.Hours -ne 1) {$VibeString += 's'}
@@ -309,26 +314,19 @@ Function Write-PinnedHeader {
         If ($VibeTime.Minutes -ne 1) {$VibeString += 's'}
     }
     $VibeString += '!'
-    [System.Int32]$AgeMins    = $TokenAge / 60
-    [System.Int32]$ExpireMins = $TokenExpires / 6000
-    [System.ConsoleColor]$TokenColor = Switch ($AgeMins) {
-        {$_ -ge ($ExpireMins * 100)} {[System.ConsoleColor]::Red; Break}        # >100% elapsed (expired)
-        {$_ -ge ($Expiremins * 90)}  {[System.ConsoleColor]::DarkYellow; Break} # >90% elapsed
-        {$_ -ge ($ExpireMins * 75)}  {[System.ConsoleColor]::Yellow; Break}     # >75% elapsed
-        Default                      {[System.ConsoleColor]::DarkCyan; Break}   # Normal
-    }
-    [System.Int32]$CurrentY = $Host.UI.RawUI.CursorPosition.Y
     [System.Console]::SetCursorPosition(0, 0)
-    Clear-ConsoleLine -Lines 7
-    Write-Host -ForegroundColor Cyan                "ZGEViz/Spotify Synchronizer  -  Straight vibin' $($VibeString)`n"
+    Clear-ConsoleLine -Lines 8
+    Write-Host -ForegroundColor Cyan                "ZGEViz/Spotify Synchronizer  -  Straight vibin' $VibeString`n"
     Write-Host -ForegroundColor DarkCyan            "Version:          $Version"
     Write-Host -ForegroundColor DarkCyan            "ZGE Handle:       $ZGEWindowHandle"
-    Write-Host -ForegroundColor DarkCyan            "Spotify PID:      $($GLOBAL:SpotifyPID)"
-    Write-Host -ForegroundColor DarkCyan            "Request Interval: $RequestInterval"
+    Write-Host -ForegroundColor DarkCyan            "Spotify PID:      $GLOBAL:SpotifyPID"
+    Write-Host -ForegroundColor DarkCyan            "Request Interval: $RequestInterval seconds"
+    Write-Host -ForegroundColor DarkCyan            "Last request:     $TimeSinceRequest seconds ago"
     Write-Host -NoNewline -ForegroundColor DarkCyan "API token age:    "
     Write-Host -ForegroundColor $TokenColor                           "$AgeMins minutes"
     Clear-ConsoleLine -FillChar '-'
     [System.Console]::SetCursorPosition(0, $CurrentY)
+    Return
 }
 
 Function Clear-ConsoleLine {
@@ -337,12 +335,11 @@ Function Clear-ConsoleLine {
         [System.Int32]$From    = $Host.UI.RawUI.CursorPosition.Y,
         [System.Char]$FillChar = ' '
     )
-    # Store initial cursor Y position
-    [System.Int32]$InitialY = $Host.UI.RawUI.CursorPosition.Y
-
+    
     # Generate string of given character with length equal to the horizontal buffer size, then repeat for specified number of lines
-    [System.String]$ClearLine = -Join ([System.String]$FillChar * $Host.UI.RawUI.BufferSize.Width)
+    [System.String]$ClearLine     = -Join ([System.String]$FillChar * $Host.UI.RawUI.BufferSize.Width)
     [System.String[]]$ClearString = $ClearLine * $Lines
+    [System.Int32]$InitialY       = $Host.UI.RawUI.CursorPosition.Y # Store initial cursor Y position
 
     # Position cursor and clear lines
     [System.Console]::SetCursorPosition(0, $From)
@@ -350,20 +347,16 @@ Function Clear-ConsoleLine {
 
     # Revert to initial cursor position
     If (!$PSBoundParameters.ContainsKey('FillChar')) {[System.Console]::SetCursorPosition(0, $InitialY)}
+    Return
 }
 
 Function Get-SpotifyOAuth {
-    Param (
-        [System.String]$Set
-    )
+    Param ([System.String]$Set)
     # Function for fetching the Spotify OAuth token
 
-    # Path for credential storage
-    [System.String]$CredPath = "$($GLOBAL:WorkingDirectory)\SptAPI.cred"
-
-    [System.Int32]$OriginalY = $Host.UI.RawUI.CursorPosition.Y
-
-    [System.Boolean]$LoadedFromPrevious = $False
+    [System.String]$CredPath            = "$($GLOBAL:WorkingDirectory)\SptAPI.cred" # Path for credential storage
+    [System.Int32]$OriginalY            = $Host.UI.RawUI.CursorPosition.Y           # Original cursor Y position
+    [System.Boolean]$LoadedFromPrevious = $False                                    # "Loaded from previous session" flag
 
     Do {
         
@@ -372,9 +365,9 @@ Function Get-SpotifyOAuth {
 
             If ($Set) {[System.Security.SecureString]$APIToken = ConvertTo-SecureString -String $Set -AsPlainText -Force}
             Else {
-                [System.Console]::CursorVisible = $True
+                [System.Console]::CursorVisible         = $True
                 [System.Security.SecureString]$APIToken = Read-Host -Prompt 'Enter your Spotify API Token (OAuth)' -AsSecureString
-                [System.Console]::CursorVisible = $False
+                [System.Console]::CursorVisible         = $False
             }
             
             # Test token validity
@@ -443,8 +436,8 @@ Function Invoke-ZGameVizUpdater {
     [System.String]$Declarations = (Get-Content -Path @('Win32API.cs', "*.class")) -Join "`n"
     [System.String[]]$Assemblies = @(
         "System",
-        #"System.Drawing", # Disabled because Win32WindowActions might not be needed
-        #"System.Drawing.Primitives", # Disabled because Win32WindowActions might not be needed
+        #"System.Drawing",            # Disabled because the Win32MouseActions class, and the IsIconic and ShowWindow methods of Win32WindowActions, currently won't be loaded
+        #"System.Drawing.Primitives", # Disabled because the Win32MouseActions class, and the IsIconic and ShowWindow methods of Win32WindowActions, currently won't be loaded
         "System.Runtime.InteropServices",
         "System.Windows.Forms"
     )
@@ -455,7 +448,7 @@ Function Invoke-ZGameVizUpdater {
     [System.Void][System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
 
     # Initialize objects
-        [System.Version]$Version                                  = '23.2.13.730'      # Set-Clipboard "'$(Get-Date -Format "y.M.d.Hmm")'"
+        [System.Version]$Version                                  = '23.2.22.713'      # Set-Clipboard "'$(Get-Date -Format "y.M.d.Hmm")'"
         [System.DateTime]$GLOBAL:StartupTime                      = Get-Date           # Startup timestamp
         [System.Void]$GLOBAL:StartupTime                                               # Because IntelliSense is silly
     # Globals
@@ -490,11 +483,12 @@ Function Invoke-ZGameVizUpdater {
             'Got your drink? :)'
         ) # Rolling reminders
         [System.Collections.Hashtable]$PinnedHeader = @{                               # Splat object for Write-PinnedHeader
-            Version         = $Version
-            ZGEWindowHandle = $ZGEWindowHandle
-            RequestInterval = $RequestInterval
-            TokenAge        = $TokenAge
-            TokenExpires    = $TokenExpires
+            Version          = $Version
+            ZGEWindowHandle  = $ZGEWindowHandle
+            RequestInterval  = $RequestInterval
+            TokenAge         = $TokenAge
+            TokenExpires     = $TokenExpires
+            TimeSinceRequest = 0
         } # Splat object for Write-PinnedHeader
         [System.String[]]$TextTemplate = @(                                            # Output template with ??DUMMYVALUES???
             'Now playing',
@@ -524,12 +518,12 @@ Function Invoke-ZGameVizUpdater {
                 [System.Void]$Focus::SetForegroundWindow($Handle)
             }
             [System.Void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic')
-            While (!$Valid) {
+            While ($True) {
                 [ThreadJob.ThreadJob]$FocusJob = Start-ThreadJob -ScriptBlock $AsyncFocus -Name 'Focus'
-                [System.String]$Text = [Microsoft.VisualBasic.Interaction]::InputBox('Enter new Spotify auth token', 'Spotify API token soon expired', 'Enter token...')
+                [System.String]$Text           = [Microsoft.VisualBasic.Interaction]::InputBox('Enter new Spotify auth token', 'Spotify API token soon expired')
                 Remove-Job -Id $FocusJob.Id -Force
                 Remove-Variable -Name FocusJob
-                If ($Text -Match 'BQ[a-zA-Z0-9_\-]{174}') {$Valid = $True}
+                If ($Text -Match 'BQ[a-zA-Z0-9_\-]{174}') {Break}
                 Else {[System.Void][Microsoft.VisualBasic.Interaction]::MsgBox('The token is invalid. Try again.', 16, 'Invalid API token')}
             }
             Write-Output $Text
@@ -540,8 +534,9 @@ Function Invoke-ZGameVizUpdater {
     Write-Host -ForegroundColor Cyan     "ZGEViz/Spotify Synchronizer  -  Just started vibin'`n"
     Write-Host -ForegroundColor DarkCyan "Version:          $Version"
     Write-Host -ForegroundColor DarkCyan "ZGE Handle:       $ZGEWindowHandle"
-    Write-Host -ForegroundColor DarkCyan "Spotify PID:      $($GLOBAL:SpotifyPID)"
-    Write-Host -ForegroundColor DarkCyan "Request Interval: $RequestInterval"
+    Write-Host -ForegroundColor DarkCyan "Spotify PID:      $GLOBAL:SpotifyPID"
+    Write-Host -ForegroundColor DarkCyan "Request Interval: $RequestInterval seconds"
+    Write-Host -ForegroundColor DarkCyan "Last request:     --- seconds ago"
     Write-Host -ForegroundColor DarkCyan "API token age:    ---"
     Clear-ConsoleLine -FillChar '-'
     For ([System.Int32]$SleepTime = $StartupDelay; $SleepTime -ge 0; $SleepTime--) {
@@ -567,9 +562,10 @@ Function Invoke-ZGameVizUpdater {
         }
 
         # Refresh token age and time since last API request
-        $PreviousRequest = (New-TimeSpan -Start $GLOBAL:LastRequest       -End (Get-Date)).TotalSeconds
-        $TokenAge        = (New-TimeSpan -Start $GLOBAL:TokenCreationTime -End (Get-Date)).TotalSeconds
-        $PinnedHeader['TokenAge'] = $TokenAge
+        [System.Double]$PreviousRequest   = (New-TimeSpan -Start $GLOBAL:LastRequest       -End (Get-Date)).TotalSeconds
+        [System.Double]$TokenAge          = (New-TimeSpan -Start $GLOBAL:TokenCreationTime -End (Get-Date)).TotalSeconds
+        $PinnedHeader['TokenAge']         = $TokenAge
+        $PinnedHeader['TimeSinceRequest'] = [System.Int32]$PreviousRequest
         If ($TokenAge -le $_TokenAge) {$IterationsToWarning = $TokenWarnInterval}
 
         # Check token age and alert if appropriate
@@ -585,6 +581,35 @@ Function Invoke-ZGameVizUpdater {
                 $IterationsToWarning = $TokenWarnInterval
             } Else {$IterationsToWarning--}
             Write-PinnedHeader @PinnedHeader
+        }
+
+        # Check if the data was updated correctly
+        If ([Win32WindowActions]::GetForegroundWindow() -eq $ZGEWindowHandle -And $_TokenAge) {
+            [System.Object]$Clipboard = Get-Clipboard -Raw
+
+            # CTRL + A
+            [Win32KeyEvent]::Sendkey(0x11, 0) # CTRL key down
+            Start-Sleep -Milliseconds 100
+            [Win32KeyEvent]::Sendkey(0x41, 0) # A key down
+            Start-Sleep -Milliseconds 50
+            [Win32KeyEvent]::Sendkey(0x41, 2) # A key up
+            Start-Sleep -Milliseconds 100
+            [Win32KeyEvent]::Sendkey(0x11, 2) # CTRL key up
+            Start-Sleep -Milliseconds 200
+
+            # CTRL + C
+            [Win32KeyEvent]::Sendkey(0x11, 0) # CTRL key down
+            Start-Sleep -Milliseconds 100
+            [Win32KeyEvent]::Sendkey(0x43, 0) # C key down
+            Start-Sleep -Milliseconds 50
+            [Win32KeyEvent]::Sendkey(0x43, 2) # C key up
+            Start-Sleep -Milliseconds 100
+            [Win32KeyEvent]::Sendkey(0x11, 2) # CTRL key up
+            Start-Sleep -Milliseconds 100
+
+            Set-Clipboard -Value $Clipboard
+
+            If ($StoredOutput -ne (Get-Clipboard -Raw)) {[System.Boolean]$Update = $True}
         }
 
         # Get currently playing track and compare to live track
@@ -658,6 +683,8 @@ Function Invoke-ZGameVizUpdater {
                 #If ([Win32WindowActions]::IsIconic($ZGEWindowHandle)) {[Win32WindowActions]::ShowWindow($ZGEWindowHandle, 9)} # This might not be needed
             }
             If ([Win32WindowActions]::GetForegroundWindow() -eq $ZGEWindowHandle) {
+
+                If ($Waiting) {Start-Sleep -Seconds 1}
 
                 Write-Host -ForegroundColor Green "Applying playback changes:"
                 Write-Host -ForegroundColor Green "`tTrack: $($Player.Current.Track)"
